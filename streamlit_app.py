@@ -5,7 +5,7 @@ import requests
 from io import BytesIO
 from PIL import Image
 
-# We will use Bokeh 2.4.3 (pinned in requirements.txt).
+# IMPORTANT: We are using bokeh==2.4.3 pinned in requirements.txt
 from bokeh.plotting import figure
 from bokeh.models import Arrow, VeeHead, ColumnDataSource, Legend
 from bokeh.models.tools import HoverTool
@@ -82,21 +82,20 @@ case_parameters = [
 def calculate_power_flow(Vs, Vr, R, X, C, delta_deg, base_voltage, length):
     """
     Calculates power flow on a line pi-section based on user inputs.
-
     Returns:
-      S_s, S_i, S_o, S_loss, S_r, Q_s, Q_r  (complex except Q_s, Q_r are floats).
+      S_s, S_i, S_o, S_loss, S_r, Q_s, Q_r
+      (complex except Q_s, Q_r are floats).
     """
     frequency = 50  # Hz
     delta_rad = np.deg2rad(delta_deg)
 
-    # Impedance for the entire line
     Z = (R + 1j * X) * length
 
-    # Actual kV from per-unit
+    # Convert from per-unit to actual kV
     V_s_actual = Vs * base_voltage
     V_r_actual = Vr * base_voltage
 
-    # Receiving voltage as a complex with angle delta (V_r e^{-j delta})
+    # Receiving voltage as a complex (Vr * e^{-j delta})
     V_r_complex = V_r_actual * np.exp(-1j * delta_rad)
 
     # Line current
@@ -105,7 +104,7 @@ def calculate_power_flow(Vs, Vr, R, X, C, delta_deg, base_voltage, length):
     # Power after shunt at sending side (S_i)
     S_i = V_s_actual * np.conjugate(I_line)
 
-    # Reactive power at sending end (capacitance)
+    # Reactive power at sending end
     Q_s = 2 * np.pi * frequency * C * length * (V_s_actual ** 2)
     S_s = S_i - 1j * Q_s
 
@@ -126,41 +125,32 @@ def calculate_power_flow(Vs, Vr, R, X, C, delta_deg, base_voltage, length):
 # ---------------------------
 def create_vector_figure(S_s, S_i, S_o, S_r, S_loss):
     """
-    Create a Bokeh figure showing all power-flow vectors as arrows.
-    We'll store everything as single-element arrays so Bokeh doesn't complain.
+    Create a Bokeh figure showing all power-flow vectors as single arrows.
+    We use single-element arrays in ColumnDataSource so column lengths match.
     """
 
-    # Single-element arrays for each arrow's start/end
     source = ColumnDataSource(data=dict(
-        # S_s: from (0,0) to (S_s.real, S_s.imag)
-        S_s_x_start=[0],         S_s_y_start=[0],
-        S_s_x_end=[S_s.real],    S_s_y_end=[S_s.imag],
+        # S_s arrow (0,0) -> (S_s.real, S_s.imag)
+        s_s_x_start=[0], s_s_y_start=[0],
+        s_s_x_end=[S_s.real], s_s_y_end=[S_s.imag],
 
-        # S_i: from (0,0) to (S_i.real, S_i.imag)
-        S_i_x_start=[0],         S_i_y_start=[0],
-        S_i_x_end=[S_i.real],    S_i_y_end=[S_i.imag],
+        # S_i arrow (0,0) -> (S_i.real, S_i.imag)
+        s_i_x_start=[0], s_i_y_start=[0],
+        s_i_x_end=[S_i.real], s_i_y_end=[S_i.imag],
 
-        # S_o: from (0,0) to (S_o.real, S_o.imag)
-        S_o_x_start=[0],         S_o_y_start=[0],
-        S_o_x_end=[S_o.real],    S_o_y_end=[S_o.imag],
+        # S_o arrow (0,0) -> (S_o.real, S_o.imag)
+        s_o_x_start=[0], s_o_y_start=[0],
+        s_o_x_end=[S_o.real], s_o_y_end=[S_o.imag],
 
-        # S_r: from (0,0) to (S_r.real, S_r.imag)
-        S_r_x_start=[0],         S_r_y_start=[0],
-        S_r_x_end=[S_r.real],    S_r_y_end=[S_r.imag],
+        # S_r arrow (0,0) -> (S_r.real, S_r.imag)
+        s_r_x_start=[0], s_r_y_start=[0],
+        s_r_x_end=[S_r.real], s_r_y_end=[S_r.imag],
 
-        # Extra arrow from S_s->S_i (like the original code)
-        S_si_x_start=[S_s.real], S_si_y_start=[S_s.imag],
-        S_si_x_end=[S_i.real],   S_si_y_end=[S_i.imag],
-
-        # Extra arrow from S_o->S_r
-        S_or_x_start=[S_o.real], S_or_y_start=[S_o.imag],
-        S_or_x_end=[S_r.real],   S_or_y_end=[S_r.imag],
-
-        # S_loss: from S_o to S_o + S_loss
-        S_loss_x_start=[S_o.real],
-        S_loss_y_start=[S_o.imag],
-        S_loss_x_end=[S_o.real + S_loss.real],
-        S_loss_y_end=[S_o.imag + S_loss.imag],
+        # Additional arrow for S_loss: from (S_o) -> (S_o + S_loss)
+        loss_x_start=[S_o.real],
+        loss_y_start=[S_o.imag],
+        loss_x_end=[S_o.real + S_loss.real],
+        loss_y_end=[S_o.imag + S_loss.imag],
     ))
 
     p = figure(
@@ -174,43 +164,29 @@ def create_vector_figure(S_s, S_i, S_o, S_r, S_loss):
 
     arrow_head = VeeHead(size=10)
 
-    # Main arrows from origin
+    # Draw each arrow
     p.add_layout(Arrow(end=arrow_head,
-                       x_start='S_s_x_start', y_start='S_s_y_start',
-                       x_end='S_s_x_end', y_end='S_s_y_end',
+                       x_start='s_s_x_start', y_start='s_s_y_start',
+                       x_end='s_s_x_end', y_end='s_s_y_end',
                        source=source, line_width=3, line_color="red"))
     p.add_layout(Arrow(end=arrow_head,
-                       x_start='S_i_x_start', y_start='S_i_y_start',
-                       x_end='S_i_x_end', y_end='S_i_y_end',
+                       x_start='s_i_x_start', y_start='s_i_y_start',
+                       x_end='s_i_x_end', y_end='s_i_y_end',
                        source=source, line_width=3, line_color="green"))
     p.add_layout(Arrow(end=arrow_head,
-                       x_start='S_o_x_start', y_start='S_o_y_start',
-                       x_end='S_o_x_end', y_end='S_o_y_end',
+                       x_start='s_o_x_start', y_start='s_o_y_start',
+                       x_end='s_o_x_end', y_end='s_o_y_end',
                        source=source, line_width=3, line_color="blue"))
     p.add_layout(Arrow(end=arrow_head,
-                       x_start='S_r_x_start', y_start='S_r_y_start',
-                       x_end='S_r_x_end', y_end='S_r_y_end',
+                       x_start='s_r_x_start', y_start='s_r_y_start',
+                       x_end='s_r_x_end', y_end='s_r_y_end',
                        source=source, line_width=3, line_color="purple"))
-
-    # Extra arrows for partial vectors
     p.add_layout(Arrow(end=arrow_head,
-                       x_start='S_si_x_start', y_start='S_si_y_start',
-                       x_end='S_si_x_end', y_end='S_si_y_end',
-                       source=source, line_width=3, line_color="orange"))
-    p.add_layout(Arrow(end=arrow_head,
-                       x_start='S_or_x_start', y_start='S_or_y_start',
-                       x_end='S_or_x_end', y_end='S_or_y_end',
-                       source=source, line_width=3, line_color="cyan"))
-
-    # Arrow for power loss
-    p.add_layout(Arrow(end=arrow_head,
-                       x_start='S_loss_x_start', y_start='S_loss_y_start',
-                       x_end='S_loss_x_end', y_end='S_loss_y_end',
+                       x_start='loss_x_start', y_start='loss_y_start',
+                       x_end='loss_x_end', y_end='loss_y_end',
                        source=source, line_width=3, line_color="magenta"))
 
-    # Add hover
     p.add_tools(HoverTool())
-
     return p
 
 # ---------------------------
@@ -239,7 +215,6 @@ def create_bar_chart(S_s, S_i, S_o, S_r, S_loss):
         tools="",
     )
 
-    # We'll do two vbars, slightly offset
     x_locations = list(range(len(bar_labels)))
     width = 0.3
 
@@ -250,7 +225,7 @@ def create_bar_chart(S_s, S_i, S_o, S_r, S_loss):
         width=width,
         source=source_bar,
         color="#4a69bd",
-        legend_label="Active Power (MW)"
+        legend_label="Active (MW)"
     )
 
     # Reactive bars (red)
@@ -260,13 +235,12 @@ def create_bar_chart(S_s, S_i, S_o, S_r, S_loss):
         width=width,
         source=source_bar,
         color="#e55039",
-        legend_label="Reactive Power (MVAr)"
+        legend_label="Reactive (MVAr)"
     )
 
     p_bar.xaxis.ticker = x_locations
     p_bar.xaxis.major_label_overrides = {i: lbl for i, lbl in enumerate(bar_labels)}
-    p_bar.xaxis.axis_label = ""
-    p_bar.yaxis.axis_label = "Power (MW / MVAr)"
+    p_bar.yaxis.axis_label = "Power"
     p_bar.legend.location = "top_left"
     return p_bar
 
@@ -281,18 +255,18 @@ st.title("Power Flow Simulator for Transmission Lines")
 col_image, col_table = st.columns([1, 2])
 
 with col_image:
-    st.subheader("Power flows on a line PI section")
+    st.subheader("Line PI Section Diagram")
 
     img_url = "https://i.postimg.cc/FKStDhY9/Frame-2-1.png"
     try:
         resp = requests.get(img_url, timeout=5)
         pi_image = Image.open(BytesIO(resp.content))
         st.image(pi_image, width=350)
-    except Exception:
+    except:
         st.write("Image not available.")
 
 with col_table:
-    st.subheader("Example cases of different lines")
+    st.subheader("Example Cases of Different Lines")
 
     df_table = pd.DataFrame({
         "Voltage_Level": [c["Voltage_Level"] for c in case_parameters],
@@ -304,18 +278,16 @@ with col_table:
     })
     st.dataframe(df_table, use_container_width=True)
 
-# Row 2: Case selection
 st.markdown("---")
-col_case, _ = st.columns([1, 4])
+col_case, _ = st.columns([1, 3])
 with col_case:
     st.subheader("Select a Case")
     case_names = [case["name"] for case in case_parameters]
     selected_case = st.selectbox("Pick a line/cable case:", options=case_names)
 
-    # Find the matching case
-    default_case = next(case for case in case_parameters if case["name"] == selected_case)
+    default_case = next(c for c in case_parameters if c["name"] == selected_case)
 
-# Row 3: Sliders / Inputs
+# Sliders / Inputs
 st.markdown("---")
 col1, col2, col3, col4, col5 = st.columns(5)
 
@@ -324,13 +296,12 @@ with col1:
     Vr = st.slider("Vr (pu)", 0.8, 1.2, 0.95, 0.01)
 
 with col2:
-    R = st.number_input("R (Ω/km)", min_value=0.0001, max_value=2.0,
+    R = st.number_input("R (Ω/km)", min_value=0.0001, max_value=1.0,
                         value=float(default_case["R"]), step=0.0001)
     X = st.number_input("X (Ω/km)", min_value=0.0001, max_value=2.0,
                         value=float(default_case["X"]), step=0.0001)
 
 with col3:
-    # Convert default C to nF for the display
     default_C_nF = default_case["C"] * 1e9
     C_nF = st.number_input("C (nF/km)", min_value=0.1, max_value=1000.0,
                            value=float(default_C_nF), step=1.0)
@@ -345,16 +316,12 @@ with col5:
     base_voltage = st.number_input("Base Voltage (kV)", min_value=1.0, max_value=1000.0,
                                    value=float(default_case["base_voltage"]), step=1.0)
 
-# ---------------------------
-# Perform Calculations
-# ---------------------------
+# Compute Power Flow
 S_s, S_i, S_o, S_loss, S_r, Q_s, Q_r = calculate_power_flow(
     Vs, Vr, R, X, C, delta_deg, base_voltage, length
 )
 
-# ---------------------------
 # Plots
-# ---------------------------
 col_plot1, col_plot2 = st.columns(2)
 
 with col_plot1:
@@ -367,9 +334,6 @@ with col_plot2:
     fig_bar = create_bar_chart(S_s, S_i, S_o, S_r, S_loss)
     st.bokeh_chart(fig_bar, use_container_width=True)
 
-# ---------------------------
-# Display Numeric Results
-# ---------------------------
 st.markdown("---")
 st.subheader("Numeric Results")
 
@@ -378,23 +342,20 @@ col_res1, col_res2, col_res3 = st.columns(3)
 with col_res1:
     st.write("**Sending End Power (S_s):**")
     st.write(f"{S_s.real:.2f} MW + j {S_s.imag:.2f} MVAr")
-
     st.write("**After Shunt (S_i):**")
     st.write(f"{S_i.real:.2f} MW + j {S_i.imag:.2f} MVAr")
 
 with col_res2:
     st.write("**Before Shunt (S_o):**")
     st.write(f"{S_o.real:.2f} MW + j {S_o.imag:.2f} MVAr")
-
     st.write("**Receiving End Power (S_r):**")
     st.write(f"{S_r.real:.2f} MW + j {S_r.imag:.2f} MVAr")
 
 with col_res3:
     st.write("**Power Loss (S_loss):**")
     st.write(f"{S_loss.real:.2f} MW + j {S_loss.imag:.2f} MVAr")
-
     st.write(f"**Q_s (MVAr at Sending):** {Q_s:.2f}")
     st.write(f"**Q_r (MVAr at Receiving):** {Q_r:.2f}")
 
 st.markdown("---")
-st.caption("Requires Bokeh 2.4.3. Built with ❤️ using [Streamlit](https://streamlit.io) + Bokeh.")
+st.caption("Make sure to use NumPy ≥ 1.24 for `np.bool8`. Built with ❤️ using Streamlit + Bokeh 2.4.3.")
