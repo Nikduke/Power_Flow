@@ -1,6 +1,6 @@
 streamlit==1.41.1
 bokeh==2.4.3
 numpy==1.24.3
-pandas
-requests
-pillow
+pandas==2.2.3
+requests==2.32.3
+pillow==11.0.0
