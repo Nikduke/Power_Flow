@@ -1,2 +1,6 @@
 streamlit
+bokeh
 numpy
+pandas
+pillow
+requests
