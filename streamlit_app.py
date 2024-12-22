@@ -4,6 +4,9 @@ import numpy as np
 import math
 import plotly.graph_objects as go
 
+# Configure the page to use wide mode
+st.set_page_config(page_title="Transmission Line Power Flow Simulator", layout="wide")
+
 # ===============================
 # 1) CASE PARAMETERS & DATAFRAME
 # ===============================
@@ -37,12 +40,8 @@ def calculate_power_flow(Vs, Vr, R, X, C, delta_deg, base_voltage, length, freq=
     Returns:
       S_s, S_i, S_o, S_r, S_loss  (complex MVA),
       plus Q_s, Q_r in MVAr.
-    
-    Key points:
-     - Q_r is drawn from the tip of S_o, not S_r,
-       meaning we treat Q_r as reactive power at the receiving end 
-       but after the line, so we visualize it from S_o -> S_o + jQ_r.
-     - Q_s is from S_s -> S_s + jQ_s.
+    Q_r is drawn from the tip of S_o -> S_o + jQ_r,
+    Q_s is from S_s -> S_s + jQ_s.
     """
     delta_rad = np.deg2rad(delta_deg)
     Z = (R + 1j*X)*length
@@ -50,8 +49,8 @@ def calculate_power_flow(Vs, Vr, R, X, C, delta_deg, base_voltage, length, freq=
     if abs(Z) < 1e-12:
         return (np.nan,)*5 + (np.nan, np.nan)
 
-    V_s_actual = Vs*base_voltage
-    V_r_actual = Vr*base_voltage
+    V_s_actual = Vs * base_voltage
+    V_r_actual = Vr * base_voltage
 
     # Receiving-end phasor
     V_r_phasor = V_r_actual * np.exp(-1j * delta_rad)
@@ -74,12 +73,9 @@ def calculate_power_flow(Vs, Vr, R, X, C, delta_deg, base_voltage, length, freq=
 
     # Q_r from line's C
     Q_r = 2.0 * math.pi * freq * C * length * (V_r_actual**2)
-    # For your request, we do S_o + j Q_r
-    # (So that Q_r arrow is from S_o)
     S_r = S_o + 1j * Q_r
 
     return S_s, S_i, S_o, S_r, S_loss, Q_s, Q_r
-
 
 # ===============================
 # 3) PLOTTING
@@ -87,10 +83,10 @@ def calculate_power_flow(Vs, Vr, R, X, C, delta_deg, base_voltage, length, freq=
 def plot_power_vectors(S_s, S_i, S_o, S_r, S_loss, Q_s, Q_r):
     """
     - S_s, S_i, S_o, S_r from origin
-    - S_loss from the tip of S_i => S_i - S_loss? Actually, let's do from S_o => S_o + S_loss
-    - Q_s from S_s => S_s + jQ_s
-    - Q_r from S_o => S_o + jQ_r
-    - Smaller annotation offset = 2.5% so it's not "too far."
+    - S_loss from S_o -> S_o + S_loss
+    - Q_s from S_s -> S_s + jQ_s
+    - Q_r from S_o -> S_o + jQ_r
+    - Smaller annotation offset so labels aren't far.
     """
     fig = go.Figure()
 
@@ -110,37 +106,32 @@ def plot_power_vectors(S_s, S_i, S_o, S_r, S_loss, Q_s, Q_r):
     # Q_r from S_o
     Q_r_xy = (S_o_xy[0], S_o_xy[1] + Q_r)
 
-    all_pts = [
-        (0,0), S_s_xy, S_i_xy, S_o_xy, S_r_xy,
-        S_loss_xy, Q_s_xy, Q_r_xy
-    ]
+    all_pts = [(0,0), S_s_xy, S_i_xy, S_o_xy, S_r_xy, S_loss_xy, Q_s_xy, Q_r_xy]
     coords = [c for p in all_pts for c in p]
     if any(np.isnan(c) or not np.isfinite(c) for c in coords):
         fig.update_layout(title="NaN or Inf. Check parameters!")
         return fig
 
     def add_vec(tail, tip, color, label):
-        x0,y0 = tail
-        x1,y1 = tip
-        # arrow
+        x0, y0 = tail
+        x1, y1 = tip
+        # Arrow
         fig.add_annotation(
             x=x1, y=y1, xref="x", yref="y",
             ax=x0, ay=y0, axref="x", ayref="y",
             arrowhead=3, arrowsize=1.5, arrowwidth=2, arrowcolor=color,
             text="", showarrow=True
         )
-        # label
-        mx = 0.5*(x0 + x1)
-        my = 0.5*(y0 + y1)
-        dx = x1 - x0
-        dy = y1 - y0
+        # Label in midpoint
+        mx, my = 0.5*(x0 + x1), 0.5*(y0 + y1)
+        dx, dy = (x1 - x0), (y1 - y0)
         length = np.hypot(dx, dy)
         if length > 1e-12:
-            nx = -dy / length
-            ny = dx / length
-            offset = 0.025 * length  # smaller offset so it's not "too far"
-            ox = mx + offset * nx
-            oy = my + offset * ny
+            nx = -dy/length
+            ny = dx/length
+            offset = 0.025 * length
+            ox = mx + offset*nx
+            oy = my + offset*ny
         else:
             ox, oy = mx, my
 
@@ -151,7 +142,7 @@ def plot_power_vectors(S_s, S_i, S_o, S_r, S_loss, Q_s, Q_r):
             xanchor="center", yanchor="middle"
         )
 
-    # S_s, S_i, S_o, S_r from origin
+    # Draw main vectors
     add_vec((0,0), S_s_xy, "red", "S_s")
     add_vec((0,0), S_i_xy, "green", "S_i")
     add_vec((0,0), S_o_xy, "blue", "S_o")
@@ -178,26 +169,25 @@ def plot_power_vectors(S_s, S_i, S_o, S_r, S_loss, Q_s, Q_r):
         title="Transmission Line Power Flow Simulator",
         xaxis=dict(range=[min_x - margin_x, max_x + margin_x], zeroline=True),
         yaxis=dict(range=[min_y - margin_y, max_y + margin_y], zeroline=True),
-        width=800, height=500
+        width=750, height=500  # a bit narrower to fit in wide mode
     )
     return fig
 
-# Bar chart with order: (S_s, S_i, S_o, S_r, S_loss)
 def plot_bar_chart(S_s, S_i, S_o, S_r, S_loss):
     labels = ["S_s", "S_i", "S_o", "S_r", "S_loss"]
-    real_vals = [S_s.real, S_i.real, S_o.real, S_r.real, S_loss.real]
-    imag_vals = [S_s.imag, S_i.imag, S_o.imag, S_r.imag, S_loss.imag]
+    reals = [S_s.real, S_i.real, S_o.real, S_r.real, S_loss.real]
+    imags = [S_s.imag, S_i.imag, S_o.imag, S_r.imag, S_loss.imag]
 
     fig = go.Figure(data=[
-        go.Bar(name='Active (MW)', x=labels, y=real_vals),
-        go.Bar(name='Reactive (MVAr)', x=labels, y=imag_vals)
+        go.Bar(name='Active (MW)', x=labels, y=reals),
+        go.Bar(name='Reactive (MVAr)', x=labels, y=imags)
     ])
     fig.update_layout(
         barmode='group',
         title="Active & Reactive Power",
         xaxis_title="Power Component",
         yaxis_title="Magnitude",
-        width=800, height=400
+        width=750, height=400
     )
     return fig
 
@@ -207,62 +197,70 @@ def plot_bar_chart(S_s, S_i, S_o, S_r, S_loss):
 def main():
     st.title("Transmission Line Power Flow Simulator")
 
-    st.image("https://i.postimg.cc/FKStDhY9/Frame-2-1.png",
-             caption="Transmission Line Pi Section",
-             width=500)
+    # First row: image + table + case selection
+    row1_col1, row1_col2 = st.columns([1.2, 2])  # e.g., ratio 1.2 : 2
+    with row1_col1:
+        st.image(
+            "https://i.postimg.cc/FKStDhY9/Frame-2-1.png",
+            caption="Transmission Line Pi Section",
+            width=350
+        )
+        st.subheader("Line Cases")
+        st.dataframe(df_cases, height=300)  # keep it shorter
+    with row1_col2:
+        case_name = st.selectbox("Select line case", list(case_parameters.keys()))
+        cinfo = case_parameters[case_name]
 
-    st.subheader("Available Line Cases")
-    st.table(df_cases)
-
-    case_name = st.selectbox("Select line case", list(case_parameters.keys()))
-    cinfo = case_parameters[case_name]
-
-    c1, c2, c3 = st.columns(3)
-    with c1:
+        st.write("**Set Parameters**:")
         Vs = st.slider("Vs (p.u.)", 0.8, 1.2, 1.0, 0.01)
         Vr = st.slider("Vr (p.u.)", 0.8, 1.2, 0.95, 0.01)
-    with c2:
         delta_deg = st.slider("Delta (°)", -60, 60, 10, 1)
         length_km = st.slider("Line Length (km)", 1.0, 300.0, float(cinfo["length"]), 1.0)
-    with c3:
         R_ohm_km = st.slider("R (Ω/km)", 0.0001, 0.5, float(cinfo["R"]), 0.01)
         X_ohm_km = st.slider("X (Ω/km)", 0.0001, 0.5, float(cinfo["X"]), 0.01)
         C_nF_km = st.slider("C (nF/km)", 0.1, 400.0, float(cinfo["C"]*1e9), 10.0)
 
-    C_f = C_nF_km * 1e-9
-
     # Calculate
+    C_f = C_nF_km * 1e-9
     S_s, S_i, S_o, S_r, S_loss, Q_s, Q_r = calculate_power_flow(
         Vs, Vr, R_ohm_km, X_ohm_km, C_f, delta_deg, cinfo["base_voltage"], length_km
     )
 
-    # Build results table
-    def fmt_cplx(z):
-        if np.isnan(z.real) or not np.isfinite(z.real):
-            return "NaN"
-        return f"{z.real:.2f} + j{z.imag:.2f}"
+    # Second row: results + 2 plots side-by-side
+    row2_col1, row2_col2 = st.columns([1,1]) 
 
-    def fmt_float(x):
-        return f"{x:.2f}" if np.isfinite(x) else "NaN"
+    # Build results table in row2_col1
+    with row2_col1:
+        def fmt_cplx(z):
+            if np.isnan(z.real) or not np.isfinite(z.real):
+                return "NaN"
+            return f"{z.real:.2f} + j{z.imag:.2f}"
 
-    data = {
-        "Name": ["S_s", "S_i", "S_o", "S_r", "S_loss", "Q_s (MVAr)", "Q_r (MVAr)"],
-        "Value": [
-            fmt_cplx(S_s), fmt_cplx(S_i), fmt_cplx(S_o),
-            fmt_cplx(S_r), fmt_cplx(S_loss),
-            fmt_float(Q_s), fmt_float(Q_r)
-        ]
-    }
-    df_res = pd.DataFrame(data)
-    st.subheader("Power Flow Results (MVA = MW + jMVAr)")
-    st.table(df_res)
+        def fmt_float(x):
+            return f"{x:.2f}" if np.isfinite(x) else "NaN"
 
-    fig_vec = plot_power_vectors(S_s, S_i, S_o, S_r, S_loss, Q_s, Q_r)
-    st.plotly_chart(fig_vec, use_container_width=True)
+        data = {
+            "Name": ["S_s", "S_i", "S_o", "S_r", "S_loss", "Q_s (MVAr)", "Q_r (MVAr)"],
+            "Value": [
+                fmt_cplx(S_s), fmt_cplx(S_i), fmt_cplx(S_o),
+                fmt_cplx(S_r), fmt_cplx(S_loss),
+                fmt_float(Q_s), fmt_float(Q_r)
+            ]
+        }
+        df_res = pd.DataFrame(data)
+        st.subheader("Power Flow Results (MVA = MW + jMVAr)")
+        st.table(df_res)
 
-    fig_bar = plot_bar_chart(S_s, S_i, S_o, S_r, S_loss)
-    st.plotly_chart(fig_bar, use_container_width=True)
-
+    # In row2_col2, show the two plots stacked or side-by-side
+    # e.g. st.tabs or st.container
+    with row2_col2:
+        tab1, tab2 = st.tabs(["Vector Diagram", "Power Bars"])
+        with tab1:
+            fig_vec = plot_power_vectors(S_s, S_i, S_o, S_r, S_loss, Q_s, Q_r)
+            st.plotly_chart(fig_vec, use_container_width=True)
+        with tab2:
+            fig_bar = plot_bar_chart(S_s, S_i, S_o, S_r, S_loss)
+            st.plotly_chart(fig_bar, use_container_width=True)
 
 if __name__ == "__main__":
     main()
