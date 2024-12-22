@@ -1,332 +1,200 @@
 import streamlit as st
 import numpy as np
-import pandas as pd
-import requests
-from io import BytesIO
-from PIL import Image
+import plotly.graph_objects as go
 
-# Bokeh 2.4.3
-from bokeh.plotting import figure
-from bokeh.models import Arrow, VeeHead, ColumnDataSource
-from bokeh.models.tools import HoverTool
+# ========== CASE PARAMETERS ==========
+case_parameters = {
+    "10 kV Overhead Line":  {"R": 0.30,  "X": 0.45, "C": 20e-9,   "length": 10,  "base_voltage": 10},
+    "10 kV Cable":          {"R": 0.20,  "X": 0.20, "C": 300e-9,  "length": 5,   "base_voltage": 10},
+    "110 kV Overhead Line": {"R": 0.07,  "X": 0.35, "C": 15e-9,   "length": 50,  "base_voltage": 110},
+    "110 kV Cable":         {"R": 0.055, "X": 0.15, "C": 200e-9,  "length": 20,  "base_voltage": 110},
+    "400 kV Overhead Line": {"R": 0.015, "X": 0.30, "C": 5e-9,    "length": 200, "base_voltage": 400},
+    "400 kV Cable":         {"R": 0.015, "X": 0.10, "C": 150e-9,  "length": 50,  "base_voltage": 400},
+}
 
-# ---------------------------
-# Data for Different Line Cases
-# ---------------------------
-case_parameters = [
-    {
-        "name": "10 kV Overhead Line",
-        "Voltage_Level": "10 kV",
-        "Type": "Overhead Line",
-        "R": 0.30,
-        "X": 0.45,
-        "C": 20e-9,
-        "length": 10,
-        "base_voltage": 10
-    },
-    {
-        "name": "10 kV Cable",
-        "Voltage_Level": "10 kV",
-        "Type": "Cable",
-        "R": 0.20,
-        "X": 0.20,
-        "C": 300e-9,
-        "length": 5,
-        "base_voltage": 10
-    },
-    {
-        "name": "110 kV Overhead Line",
-        "Voltage_Level": "110 kV",
-        "Type": "Overhead Line",
-        "R": 0.07,
-        "X": 0.35,
-        "C": 15e-9,
-        "length": 50,
-        "base_voltage": 110
-    },
-    {
-        "name": "110 kV Cable",
-        "Voltage_Level": "110 kV",
-        "Type": "Cable",
-        "R": 0.055,
-        "X": 0.15,
-        "C": 200e-9,
-        "length": 20,
-        "base_voltage": 110
-    },
-    {
-        "name": "400 kV Overhead Line",
-        "Voltage_Level": "400 kV",
-        "Type": "Overhead Line",
-        "R": 0.015,
-        "X": 0.30,
-        "C": 5e-9,
-        "length": 200,
-        "base_voltage": 400
-    },
-    {
-        "name": "400 kV Cable",
-        "Voltage_Level": "400 kV",
-        "Type": "Cable",
-        "R": 0.015,
-        "X": 0.10,
-        "C": 150e-9,
-        "length": 50,
-        "base_voltage": 400
-    },
-]
-
-
-# ---------------------------
-# Power Flow Calculation
-# ---------------------------
-def calculate_power_flow(Vs, Vr, R, X, C, delta_deg, base_voltage, length):
+# ========== POWER FLOW CALCULATION ==========
+def calculate_power_flow(Vs, Vr, R, X, C, delta_deg, base_voltage, length, frequency=50):
     """
-    Calculates approximate power flow using a line pi-section model.
-    Returns (S_s, S_i, S_o, S_loss, S_r, Q_s, Q_r).
+    Vs, Vr: sending & receiving end voltages (p.u.)
+    R, X, C: per-km line parameters
+    delta_deg: angle in degrees (receiving-end w.r.t. sending-end)
+    base_voltage: nominal kV level (e.g. 10, 110, 400)
+    length: line length in km
+    frequency: system frequency in Hz
     """
-    frequency = 50  # Hz
     delta_rad = np.deg2rad(delta_deg)
+    
+    # Impedance in ohms for the entire line
+    Z = (R + 1j*X) * length
 
-    # Total line impedance
-    Z = (R + 1j * X) * length
+    # Convert from p.u. to actual kV
+    V_s_actual = Vs * base_voltage
+    V_r_actual = Vr * base_voltage
 
-    # Convert per-unit voltages to actual kV
-    V_s_kV = Vs * base_voltage
-    V_r_kV = Vr * base_voltage
+    # Current (kA)
+    #   Vr has an angle delta, so Vr * exp(-j*delta_rad) is used in the original approach
+    #   but we can represent it directly as complex if we prefer. For simplicity:
+    V_r_phasor = V_r_actual * np.exp(-1j * delta_rad)  # “minus” if we consider receiving end lag/lead
+    I_line = (V_s_actual - V_r_phasor) / Z
 
-    # Receiving end voltage as a complex (angle = -delta)
-    V_r_complex = V_r_kV * np.exp(-1j * delta_rad)
+    # Apparent power at sending end (kV * kA = MVA)
+    S_i = V_s_actual * np.conjugate(I_line)
 
-    # Current
-    I_line = (V_s_kV - V_r_complex) / Z
+    # Reactive power from line capacitance at sending end
+    Q_s = 2 * np.pi * frequency * C * length * (V_s_actual ** 2)  # MVAr
+    S_s = S_i - 1j * Q_s  # MVA
 
-    # S_i: sending side, after shunt
-    S_i = V_s_kV * np.conjugate(I_line)
-
-    # Reactive power at sending end
-    Q_s = 2 * np.pi * frequency * C * length * (V_s_kV ** 2)
-    S_s = S_i - 1j * Q_s
-
-    # Power losses
-    S_loss = I_line * np.conjugate(I_line) * Z
+    # Losses
+    S_loss = I_line * np.conjugate(I_line) * Z  # MW + jMVAr
 
     # Power before shunt at receiving end
     S_o = S_i - S_loss
 
-    # Reactive power at receiving end
-    Q_r = 2 * np.pi * frequency * C * length * (V_r_kV ** 2)
+    # Reactive power from line capacitance at receiving end
+    Q_r = 2 * np.pi * frequency * C * length * (V_r_actual ** 2)  # MVAr
     S_r = S_o + 1j * Q_r
 
-    return S_s, S_i, S_o, S_loss, S_r, Q_s, Q_r
+    return S_s, S_i, S_o, S_loss, S_r
 
 
-# ---------------------------
-# Helpers: Create Bokeh Plots
-# ---------------------------
-def create_vector_figure(S_s, S_i, S_o, S_r, S_loss):
+# ========== PLOTTING HELPER FUNCTIONS ==========
+
+def plot_power_vectors(S_s, S_i, S_o, S_loss, S_r):
     """
-    Bokeh figure with arrows for power flow vectors.
-    Use single-element arrays in ColumnDataSource so lengths match.
+    Creates a 2D vector diagram (Real vs. Imag part) using Plotly.
     """
-    source = ColumnDataSource(data=dict(
-        # S_s: from (0,0) -> (S_s.real, S_s.imag)
-        s_s_x0=[0], s_s_y0=[0],
-        s_s_x1=[S_s.real], s_s_y1=[S_s.imag],
+    fig = go.Figure()
 
-        # S_i: from (0,0) -> (S_i.real, S_i.imag)
-        s_i_x0=[0], s_i_y0=[0],
-        s_i_x1=[S_i.real], s_i_y1=[S_i.imag],
+    # Common arrow style
+    arrow_style = dict(
+        xref="x", yref="y",
+        showarrow=True,
+        arrowhead=3,
+        arrowsize=1,
+        arrowwidth=2
+    )
 
-        # S_o: from (0,0) -> (S_o.real, S_o.imag)
-        s_o_x0=[0], s_o_y0=[0],
-        s_o_x1=[S_o.real], s_o_y1=[S_o.imag],
+    def add_arrow(fig, end_complex, color, name):
+        """Draw an arrow from (0,0) to end_complex in the complex plane."""
+        fig.add_annotation(
+            x=end_complex.real, 
+            y=end_complex.imag,
+            ax=0, ay=0,
+            arrowcolor=color,
+            text=name,
+            **arrow_style
+        )
 
-        # S_r: from (0,0) -> (S_r.real, S_r.imag)
-        s_r_x0=[0], s_r_y0=[0],
-        s_r_x1=[S_r.real], s_r_y1=[S_r.imag],
+    # Vectors from origin
+    add_arrow(fig, S_s, "red", "S_s")
+    add_arrow(fig, S_i, "green", "S_i")
+    add_arrow(fig, S_o, "blue", "S_o")
+    add_arrow(fig, S_r, "purple", "S_r")
 
-        # S_loss: from S_o to S_o + S_loss
-        loss_x0=[S_o.real],
-        loss_y0=[S_o.imag],
-        loss_x1=[S_o.real + S_loss.real],
-        loss_y1=[S_o.imag + S_loss.imag],
-    ))
+    # Power loss arrow: from S_o to S_o + S_loss
+    fig.add_annotation(
+        x=S_o.real + S_loss.real,
+        y=S_o.imag + S_loss.imag,
+        ax=S_o.real,
+        ay=S_o.imag,
+        arrowcolor="magenta",
+        text="S_loss",
+        **arrow_style
+    )
 
-    p = figure(title="Power Flow Vectors",
-               x_axis_label="Real Power (MW)",
-               y_axis_label="Reactive Power (MVAr)",
-               width=600, height=450)
-    arrow_head = VeeHead(size=10)
+    # Format the axes
+    fig.update_layout(
+        title="Power Flow Vectors (MVA)",
+        xaxis_title="Real Power (MW)",
+        yaxis_title="Reactive Power (MVAr)",
+        xaxis=dict(zeroline=True, range=[-50, 150]),
+        yaxis=dict(zeroline=True, range=[-50, 150]),
+        width=700,
+        height=500
+    )
 
-    # Draw arrows
-    p.add_layout(Arrow(end=arrow_head,
-                       x_start='s_s_x0', y_start='s_s_y0',
-                       x_end='s_s_x1',   y_end='s_s_y1',
-                       source=source, line_width=3, line_color="red"))
-    p.add_layout(Arrow(end=arrow_head,
-                       x_start='s_i_x0', y_start='s_i_y0',
-                       x_end='s_i_x1',   y_end='s_i_y1',
-                       source=source, line_width=3, line_color="green"))
-    p.add_layout(Arrow(end=arrow_head,
-                       x_start='s_o_x0', y_start='s_o_y0',
-                       x_end='s_o_x1',   y_end='s_o_y1',
-                       source=source, line_width=3, line_color="blue"))
-    p.add_layout(Arrow(end=arrow_head,
-                       x_start='s_r_x0', y_start='s_r_y0',
-                       x_end='s_r_x1',   y_end='s_r_y1',
-                       source=source, line_width=3, line_color="purple"))
-    p.add_layout(Arrow(end=arrow_head,
-                       x_start='loss_x0', y_start='loss_y0',
-                       x_end='loss_x1',   y_end='loss_y1',
-                       source=source, line_width=3, line_color="magenta"))
+    return fig
 
-    p.add_tools(HoverTool())
-    return p
+def plot_bar_chart(S_s, S_i, S_o, S_loss, S_r):
+    """
+    Creates a grouped bar chart for real (MW) and imaginary (MVAr) components.
+    """
+    labels = ["S_s", "S_i", "S_o", "S_loss", "S_r"]
+    real_vals = [S_s.real, S_i.real, S_o.real, S_loss.real, S_r.real]
+    imag_vals = [S_s.imag, S_i.imag, S_o.imag, S_loss.imag, S_r.imag]
 
+    fig = go.Figure(data=[
+        go.Bar(name='Active Power (MW)', x=labels, y=real_vals),
+        go.Bar(name='Reactive Power (MVAr)', x=labels, y=imag_vals)
+    ])
+    fig.update_layout(
+        barmode='group',
+        title="Active & Reactive Power (MW / MVAr)",
+        xaxis_title="Power Component",
+        yaxis_title="Magnitude",
+        width=700,
+        height=400
+    )
+    return fig
 
-def create_bar_chart(S_s, S_i, S_o, S_r, S_loss):
-    """Bokeh bar chart of active/reactive power."""
-    labels = ["S_s", "S_i", "S_o", "S_r", "S_loss"]
-    active_values = [S_s.real, S_i.real, S_o.real, S_r.real, S_loss.real]
-    reactive_values = [S_s.imag, S_i.imag, S_o.imag, S_r.imag, S_loss.imag]
+# ========== STREAMLIT APP ==========
 
-    source_bar = ColumnDataSource(data=dict(
-        labels=labels,
-        active=active_values,
-        reactive=reactive_values
-    ))
+def main():
+    st.title("Power Flow Simulator for Transmission Lines")
+    st.write(
+        """
+        This app calculates and visualizes the power flows (in MVA) for a single transmission line 
+        under different parameters and line types. Adjust the sliders below or select a line case.
+        """
+    )
 
-    p_bar = figure(x_range=labels, title="Active vs Reactive Power",
-                   width=500, height=450, toolbar_location=None, tools="")
+    # 1) Select case
+    selected_case_name = st.selectbox("Select a line case", list(case_parameters.keys()))
+    selected_case = case_parameters[selected_case_name]
 
-    x_vals = list(range(len(labels)))
-    width = 0.3
+    # 2) Sliders for user inputs
+    st.subheader("Line & Operating Parameters")
+    col1, col2, col3 = st.columns(3)
+    with col1:
+        Vs = st.slider("Vs (p.u.)", min_value=0.8, max_value=1.2, value=1.0, step=0.01)
+        Vr = st.slider("Vr (p.u.)", min_value=0.8, max_value=1.2, value=0.95, step=0.01)
+    with col2:
+        delta_deg = st.slider("Delta (°)", min_value=-60, max_value=60, value=10, step=1)
+        length_km = st.slider("Line Length (km)", min_value=1, max_value=300, value=selected_case["length"], step=1)
+    with col3:
+        R_ohm_km = st.slider("R (Ω/km)", min_value=0.001, max_value=0.5, value=selected_case["R"], step=0.001)
+        X_ohm_km = st.slider("X (Ω/km)", min_value=0.001, max_value=0.5, value=selected_case["X"], step=0.001)
+        C_nF_km = st.slider("C (nF/km)", min_value=0.1, max_value=400.0, value=selected_case["C"]*1e9, step=1.0)
 
-    # Active bars
-    p_bar.vbar(x=[x - 0.15 for x in x_vals],
-               top='active', width=width,
-               source=source_bar, color="#4a69bd", legend_label="Active (MW)")
-    # Reactive bars
-    p_bar.vbar(x=[x + 0.15 for x in x_vals],
-               top='reactive', width=width,
-               source=source_bar, color="#e55039", legend_label="Reactive (MVAr)")
+    # Convert C back to F
+    C_f = C_nF_km * 1e-9
 
-    p_bar.xaxis.ticker = x_vals
-    p_bar.xaxis.major_label_overrides = {i: lbl for i, lbl in enumerate(labels)}
-    p_bar.yaxis.axis_label = "Power"
-    p_bar.legend.location = "top_left"
+    # 3) Calculate
+    S_s, S_i, S_o, S_loss, S_r = calculate_power_flow(
+        Vs, Vr,
+        R_ohm_km, X_ohm_km, C_f,
+        delta_deg,
+        selected_case["base_voltage"],
+        length_km
+    )
 
-    return p_bar
+    # 4) Display numeric results
+    st.subheader("Power Flow Results (in MVA = MW + jMVAr)")
+    colA, colB, colC, colD, colE = st.columns(5)
+    colA.metric("S_s", f"{S_s.real:.2f} + j{S_s.imag:.2f}")
+    colB.metric("S_i", f"{S_i.real:.2f} + j{S_i.imag:.2f}")
+    colC.metric("S_o", f"{S_o.real:.2f} + j{S_o.imag:.2f}")
+    colD.metric("S_loss", f"{S_loss.real:.2f} + j{S_loss.imag:.2f}")
+    colE.metric("S_r", f"{S_r.real:.2f} + j{S_r.imag:.2f}")
 
+    # 5) Plot vector diagram
+    fig_vector = plot_power_vectors(S_s, S_i, S_o, S_loss, S_r)
+    st.plotly_chart(fig_vector, use_container_width=True)
 
-# ---------------------------
-# Streamlit UI
-# ---------------------------
-st.set_page_config(layout="wide")
-st.title("Power Flow Simulator")
-
-# Show table of line cases & diagram
-col_img, col_tbl = st.columns([1, 2])
-
-with col_img:
-    st.subheader("Line Diagram (PI Section)")
-    url = "https://i.postimg.cc/FKStDhY9/Frame-2-1.png"
-    try:
-        r = requests.get(url, timeout=5)
-        im = Image.open(BytesIO(r.content))
-        st.image(im, width=300)
-    except:
-        st.write("Diagram not available.")
-
-with col_tbl:
-    st.subheader("Example Cases")
-    df_table = pd.DataFrame({
-        "Voltage_Level": [c["Voltage_Level"] for c in case_parameters],
-        "Type": [c["Type"] for c in case_parameters],
-        "R (Ω/km)": [c["R"] for c in case_parameters],
-        "X (Ω/km)": [c["X"] for c in case_parameters],
-        "C (nF/km)": [f"{c['C']*1e9:.1f}" for c in case_parameters],
-        "Length (km)": [c["length"] for c in case_parameters],
-    })
-    st.dataframe(df_table, use_container_width=True)
-
-
-# Select a default case
-case_names = [c["name"] for c in case_parameters]
-selected_case = st.selectbox("Select a line/cable case:", case_names)
-default_case = next(c for c in case_parameters if c["name"] == selected_case)
-
-st.markdown("---")
-col1, col2, col3, col4, col5 = st.columns(5)
-
-with col1:
-    Vs = st.slider("Vs (pu)", 0.8, 1.2, 1.0, 0.01)
-    Vr = st.slider("Vr (pu)", 0.8, 1.2, 0.95, 0.01)
-
-with col2:
-    R = st.number_input("R (Ω/km)", 0.0001, 1.0, float(default_case["R"]), 0.0001)
-    X = st.number_input("X (Ω/km)", 0.0001, 2.0, float(default_case["X"]), 0.0001)
-
-with col3:
-    default_c_nF = default_case["C"] * 1e9
-    c_nF = st.number_input("C (nF/km)", 0.1, 1000.0, float(default_c_nF), 1.0)
-    C = c_nF * 1e-9
-
-with col4:
-    delta_deg = st.slider("Delta (°)", -60, 60, 10, 1)
-
-with col5:
-    length = st.number_input("Line Length (km)", 1.0, 1000.0, float(default_case["length"]), 1.0)
-    base_voltage = st.number_input("Base Voltage (kV)", 1.0, 1000.0, float(default_case["base_voltage"]), 1.0)
-
-# Perform calculation
-S_s, S_i, S_o, S_loss, S_r, Q_s, Q_r = calculate_power_flow(
-    Vs, Vr, R, X, C, delta_deg, base_voltage, length
-)
-
-# Show plots
-col_p1, col_p2 = st.columns(2)
-with col_p1:
-    st.subheader("Power Vectors")
-    fig_vec = create_vector_figure(S_s, S_i, S_o, S_r, S_loss)
-    st.bokeh_chart(fig_vec, use_container_width=True)
-
-with col_p2:
-    st.subheader("Active vs Reactive")
-    fig_bar = create_bar_chart(S_s, S_i, S_o, S_r, S_loss)
-    st.bokeh_chart(fig_bar, use_container_width=True)
-
-# Display numeric results
-st.markdown("---")
-st.subheader("Results")
-
-cA, cB, cC = st.columns(3)
-with cA:
-    st.write("**Sending End (S_s):**")
-    st.write(f"{S_s.real:.2f} MW + j{S_s.imag:.2f} MVAr")
-
-    st.write("**After Shunt (S_i):**")
-    st.write(f"{S_i.real:.2f} MW + j{S_i.imag:.2f} MVAr")
-
-with cB:
-    st.write("**Before Shunt (S_o):**")
-    st.write(f"{S_o.real:.2f} MW + j{S_o.imag:.2f} MVAr")
-
-    st.write("**Receiving End (S_r):**")
-    st.write(f"{S_r.real:.2f} MW + j{S_r.imag:.2f} MVAr")
-
-with cC:
-    st.write("**Line Loss (S_loss):**")
-    st.write(f"{S_loss.real:.2f} MW + j{S_loss.imag:.2f} MVAr")
-
-    st.write(f"**Q_s** (MVAr at Sending): {Q_s:.2f}")
-    st.write(f"**Q_r** (MVAr at Receiving): {Q_r:.2f}")
-
-st.markdown("---")
-st.caption("Using Bokeh 2.4.3 + NumPy 1.24+ to avoid np.bool8 errors.")
+    # 6) Plot bar chart
+    fig_bar = plot_bar_chart(S_s, S_i, S_o, S_loss, S_r)
+    st.plotly_chart(fig_bar, use_container_width=True)
 
 
-#
-# That’s all!
-#
+if __name__ == "__main__":
+    main()
