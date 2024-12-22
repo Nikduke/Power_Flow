@@ -210,7 +210,7 @@ def main():
     with col1:
         st.image("https://i.postimg.cc/FKStDhY9/Frame-2-1.png",
                  caption="Transmission Line Pi Section",
-                 width=400)
+                 width=600)
     with col2:
         st.header("Line Cases")
         st.table(df_cases)
