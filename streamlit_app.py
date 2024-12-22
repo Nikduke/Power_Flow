@@ -155,7 +155,6 @@ def plot_power_vectors(S_s, S_i, S_o, S_r, S_loss, Q_s, Q_r):
     margin_y = 0.1 * span_y
 
     fig.update_layout(
-        title="Power Diagram",
         xaxis=dict(title="Active Power (MW)", range=[min_x - margin_x, max_x + margin_x], zeroline=True),
         yaxis=dict(title="Reactive Power (MVAr)", range=[min_y - margin_y, max_y + margin_y], zeroline=True),
         width=700, height=500
@@ -174,7 +173,7 @@ def plot_bar_chart(S_s, S_i, S_o, S_r, S_loss):
     ])
     fig.update_layout(
         barmode='group',
-        title="Active & Reactive Power Chart",
+        
         xaxis_title="Power Component",
         yaxis_title="Magnitude",
         width=700, height=400
@@ -218,10 +217,12 @@ def main():
 
     col3, col4 = st.columns([1, 1])
     with col3:
+        st.header("Power Diagram")
         fig_vec = plot_power_vectors(S_s, S_i, S_o, S_r, S_loss, Q_s, Q_r)
         st.plotly_chart(fig_vec, use_container_width=True)
 
     with col4:
+        st.header("Active & Reactive Power Chart")
         fig_bar = plot_bar_chart(S_s, S_i, S_o, S_r, S_loss)
         st.plotly_chart(fig_bar, use_container_width=True)
 
