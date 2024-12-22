@@ -30,9 +30,9 @@ df_cases = pd.DataFrame([
     }
     for k, v in case_parameters.items()
 ])
-# Remove the default numeric index entirely
-df_cases.reset_index(drop=True, inplace=True)
 
+# Remove numeric index from the DataFrame
+df_cases.reset_index(drop=True, inplace=True)
 
 # ===============================
 # 2) POWER FLOW CALCULATION
@@ -50,8 +50,8 @@ def calculate_power_flow(Vs, Vr, R, X, C, delta_deg, base_voltage, length, freq=
     if abs(Z) < 1e-12:
         return (np.nan,)*5 + (np.nan, np.nan)
 
-    V_s_actual = Vs*base_voltage
-    V_r_actual = Vr*base_voltage
+    V_s_actual = Vs * base_voltage
+    V_r_actual = Vr * base_voltage
 
     # Receiving-end phasor
     V_r_phasor = V_r_actual * np.exp(-1j * delta_rad)
@@ -62,7 +62,7 @@ def calculate_power_flow(Vs, Vr, R, X, C, delta_deg, base_voltage, length, freq=
 
     # Q_s
     Q_s = 2.0 * math.pi * freq * C * length * (V_s_actual**2)
-    S_s = S_i - 1j*Q_s
+    S_s = S_i - 1j * Q_s
 
     # S_loss
     S_loss = I_line * np.conjugate(I_line)*Z
@@ -72,7 +72,7 @@ def calculate_power_flow(Vs, Vr, R, X, C, delta_deg, base_voltage, length, freq=
 
     # Q_r
     Q_r = 2.0 * math.pi * freq * C * length * (V_r_actual**2)
-    S_r = S_o + 1j*Q_r
+    S_r = S_o + 1j * Q_r
 
     return S_s, S_i, S_o, S_r, S_loss, Q_s, Q_r
 
@@ -201,7 +201,8 @@ def main():
         )
     with row1_col2:
         st.subheader("Line Cases")
-        st.dataframe(df_cases.style.format(precision=3).hide_index(), height=220)
+        # No .hide_index() => no error
+        st.dataframe(df_cases.style.format(precision=3), height=220)
 
     # Row 2: narrower col with case selector + sliders, bigger col with vector diagram
     row2_col1, row2_col2 = st.columns([0.8,2])
@@ -219,6 +220,7 @@ def main():
         C_nF_km = st.slider("C (nF/km)", 0.1, 400.0, float(cinfo["C"]*1e9), 10.0)
 
     with row2_col2:
+        # Perform calculations
         C_f = C_nF_km * 1e-9
         S_s, S_i, S_o, S_r, S_loss, Q_s, Q_r = calculate_power_flow(
             Vs, Vr, R_ohm_km, X_ohm_km, C_f, delta_deg, cinfo["base_voltage"], length_km
@@ -249,7 +251,6 @@ def main():
         }
         df_res = pd.DataFrame(data)
         st.table(df_res)
-
     with row3_col2:
         fig_bar = plot_bar_chart(S_s, S_i, S_o, S_r, S_loss)
         st.plotly_chart(fig_bar, use_container_width=True)
