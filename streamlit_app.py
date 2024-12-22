@@ -206,7 +206,7 @@ def main():
 
     # OPTIONAL: If you have a line diagram, show it here
     st.image(
-        "YOUR_IMAGE_URL_HERE.png",
+        "https://i.postimg.cc/FKStDhY9/Frame-2-1.png",
         caption="Power Flow on a Transmission Line (Pi Model)",
         width=500
     )
