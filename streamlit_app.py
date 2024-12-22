@@ -190,11 +190,9 @@ def plot_bar_chart(S_s, S_i, S_o, S_loss, S_r):
 # 4) STREAMLIT APP
 # ===============================
 def main():
-    st.title("Power Flow Simulator (Correct Q_s, Q_r Vectors)")
+    st.title("Power Flow Simulator")
     st.write("""
-        This app draws S_s, S_i, S_o, S_r from the origin, S_loss from S_o, 
-        and Q_s from S_s, Q_r from S_r. Labels appear in the middle 
-        with a small perpendicular offset.
+        
     """)
 
     # Show line diagram
@@ -261,7 +259,7 @@ def main():
     fig_vec = plot_power_vectors(S_s, S_i, S_o, S_loss, S_r, Q_s, Q_r)
     st.plotly_chart(fig_vec, use_container_width=True)
 
-    fig_bars = plot_bar_chart(S_s, S_i, S_o, S_loss, S_r)
+    fig_bars = plot_bar_chart(S_s, S_i, S_o, S_r, S_loss)
     st.plotly_chart(fig_bars, use_container_width=True)
 
 
