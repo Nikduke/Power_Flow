@@ -2,6 +2,7 @@ import streamlit as st
 import pandas as pd
 import numpy as np
 import plotly.graph_objects as go
+import math
 
 # ===============================
 # 1) CASE PARAMETERS & DATAFRAME
@@ -27,36 +28,35 @@ df_cases = pd.DataFrame([
     for k, v in case_parameters.items()
 ])
 
-# ===============================
+# ==================================
 # 2) POWER FLOW CALCULATION
-# ===============================
+# ==================================
 @st.cache_data
 def calculate_power_flow(Vs, Vr, R, X, C, delta_deg, base_voltage, length, freq=50):
     """
     Returns:
-      S_s, S_i, S_o, S_loss, S_r (complex MVA),
-      Q_s, Q_r (floats in MVAr).
+      S_s, S_i, S_o, S_loss, S_r  (complex MVA),
+      Q_s, Q_r (floats, MVAr).
     """
     delta_rad = np.deg2rad(delta_deg)
     Z = (R + 1j*X)*length
     if abs(Z) < 1e-12:
         return (np.nan,)*5 + (np.nan, np.nan)
 
-    # Actual line voltages
     V_s_actual = Vs*base_voltage
     V_r_actual = Vr*base_voltage
 
-    # Receiving phasor
+    # Receiving-end phasor
     V_r_phasor = V_r_actual * np.exp(-1j*delta_rad)
 
-    # Current
-    I_line = (V_s_actual - V_r_phasor)/Z  # kA
+    # Current in kA
+    I_line = (V_s_actual - V_r_phasor)/Z
 
-    # Apparent power at sending end
-    S_i = V_s_actual*np.conjugate(I_line)  # MVA
+    # S_i
+    S_i = V_s_actual*np.conjugate(I_line)
 
-    # Q_s (MVAr) from line's C at sending end
-    Q_s = 2*np.pi*freq*C*length*(V_s_actual**2)
+    # Q_s
+    Q_s = 2*math.pi*freq*C*length*(V_s_actual**2)
     S_s = S_i - 1j*Q_s
 
     # Losses
@@ -66,108 +66,118 @@ def calculate_power_flow(Vs, Vr, R, X, C, delta_deg, base_voltage, length, freq=
     S_o = S_i - S_loss
 
     # Q_r
-    Q_r = 2*np.pi*freq*C*length*(V_r_actual**2)
+    Q_r = 2*math.pi*freq*C*length*(V_r_actual**2)
     S_r = S_o + 1j*Q_r
 
     return S_s, S_i, S_o, S_loss, S_r, Q_s, Q_r
 
 
-# ===============================
-# 3) PLOTTING WITH MIDPOINT LABELS
-# ===============================
+# =================================================
+# 3) PLOTLY VECTORS - Q_s from S_s, Q_r from S_r
+# =================================================
 def plot_power_vectors(S_s, S_i, S_o, S_loss, S_r, Q_s, Q_r):
     """
-    Draw arrowed vectors for (S_s, S_i, S_o, S_r) from origin,
-    plus S_loss from S_o to S_o+S_loss,
-    plus Q_s, Q_r from origin (purely imaginary).
-    *Arrowhead at tip*, *text in the MIDDLE*.
-
-    We'll do this by using two annotations per vector:
-    - One annotation for the arrow (tail->tip, no text).
-    - One annotation for text in the midpoint (showarrow=False).
+    Draw arrowed vectors:
+      S_s, S_i, S_o, S_r from origin,
+      S_loss from S_o->(S_o+S_loss),
+      Q_s from S_s->(S_s + j Q_s),
+      Q_r from S_r->(S_r + j Q_r).
+    Labels in the middle, offset so text doesn't overlap the arrow line.
     """
     fig = go.Figure()
 
-    # Convert Q_s, Q_r to imaginary vectors
-    Q_s_c = 1j*Q_s
-    Q_r_c = 1j*Q_r
+    # Check if any are invalid
+    # We'll build a list of the endpoints:
+    def pair(z): return [z.real, z.imag]
 
-    # Build a list of endpoints to check for invalid
-    coords = [
-        S_s.real, S_s.imag, S_i.real, S_i.imag, S_o.real, S_o.imag,
-        S_r.real, S_r.imag,
-        (S_o.real + S_loss.real), (S_o.imag + S_loss.imag),
-        Q_s_c.real, Q_s_c.imag,
-        Q_r_c.real, Q_r_c.imag
+    S_s_end = pair(S_s)
+    S_i_end = pair(S_i)
+    S_o_end = pair(S_o)
+    S_loss_end = [S_o_end[0] + S_loss.real, S_o_end[1] + S_loss.imag]
+    S_r_end = pair(S_r)
+    # Q_s from S_s => S_s + jQ_s
+    Q_s_end = [S_s_end[0], S_s_end[1] + Q_s]
+    # Q_r from S_r => S_r + jQ_r
+    Q_r_end = [S_r_end[0], S_r_end[1] + Q_r]
+
+    all_points = [
+        [0,0], S_s_end, S_i_end, S_o_end, S_r_end, S_loss_end, Q_s_end, Q_r_end
     ]
+    # Flatten
+    coords = []
+    for p in all_points:
+        coords.extend(p)
     if any(np.isnan(c) or not np.isfinite(c) for c in coords):
         fig.update_layout(title="Invalid flows (NaN or Inf). Check parameters!")
         return fig
 
-    # Collect x,y for autoscale
-    reals = [
-        0, S_s.real, S_i.real, S_o.real, S_r.real,
-        (S_o.real + S_loss.real),
-        Q_s_c.real, Q_r_c.real
-    ]
-    imags = [
-        0, S_s.imag, S_i.imag, S_o.imag, S_r.imag,
-        (S_o.imag + S_loss.imag),
-        Q_s_c.imag, Q_r_c.imag
-    ]
-    min_x, max_x = min(reals), max(reals)
-    min_y, max_y = min(imags), max(imags)
-
-    margin_x = 0.1*(max_x - min_x if max_x!=min_x else 1)
-    margin_y = 0.1*(max_y - min_y if max_y!=min_y else 1)
-    x_range = [min_x - margin_x, max_x + margin_x]
-    y_range = [min_y - margin_y, max_y + margin_y]
-
-    # We'll define a helper that draws an arrow from (x0,y0)->(x1,y1),
-    # but puts the label in the middle.
-    def add_vector(fig, x0, y0, x1, y1, color, label):
-        # 1) the arrow from tail -> tip, no text
+    # We'll define a helper to add a vector from (x0,y0) to (x1,y1)
+    def add_vector(x0, y0, x1, y1, color, label):
+        # 1) The arrow from tail->tip, no label
         fig.add_annotation(
             x=x1, y=y1, xref="x", yref="y",
             ax=x0, ay=y0, axref="x", ayref="y",
             arrowhead=3, arrowsize=1.5, arrowwidth=2, arrowcolor=color,
             text="", showarrow=True
         )
-        # 2) a second annotation for the label in the midpoint
+        # 2) A label in the midpoint, offset perpendicular
         mx = 0.5*(x0 + x1)
         my = 0.5*(y0 + y1)
+        dx = x1 - x0
+        dy = y1 - y0
+        length = np.hypot(dx, dy)
+        if length > 1e-12:
+            # unit normal is (-dy, dx) or (dy, -dx). We'll pick one
+            # for consistent offset to the "left" of vector
+            nx = -dy/length
+            ny = dx/length
+            # e.g. offset by 5% of vector length
+            offset = 0.05*length
+            ox = mx + offset*nx
+            oy = my + offset*ny
+        else:
+            # degenerate vector, no offset
+            ox, oy = mx, my
+
         fig.add_annotation(
-            x=mx, y=my, xref="x", yref="y",
+            x=ox, y=oy, xref="x", yref="y",
             text=label, showarrow=False,
             font=dict(color=color, size=14),
             xanchor="center", yanchor="middle"
         )
 
-    # Draw S_s, S_i, S_o, S_r from origin
-    add_vector(fig, 0, 0, S_s.real, S_s.imag, "red", "S_s")
-    add_vector(fig, 0, 0, S_i.real, S_i.imag, "green", "S_i")
-    add_vector(fig, 0, 0, S_o.real, S_o.imag, "blue", "S_o")
-    add_vector(fig, 0, 0, S_r.real, S_r.imag, "purple", "S_r")
+    # 1) S_s, S_i, S_o, S_r from origin
+    add_vector(0, 0, S_s_end[0], S_s_end[1], "red", "S_s")
+    add_vector(0, 0, S_i_end[0], S_i_end[1], "green", "S_i")
+    add_vector(0, 0, S_o_end[0], S_o_end[1], "blue", "S_o")
+    add_vector(0, 0, S_r_end[0], S_r_end[1], "purple", "S_r")
 
-    # S_loss from S_o => S_o + S_loss
-    add_vector(
-        fig,
-        S_o.real, S_o.imag,
-        S_o.real + S_loss.real, S_o.imag + S_loss.imag,
-        "magenta", "S_loss"
-    )
+    # 2) S_loss from S_o => S_o + S_loss
+    add_vector(S_o_end[0], S_o_end[1], S_loss_end[0], S_loss_end[1], "magenta", "S_loss")
 
-    # Q_s, Q_r from origin (pure imaginary)
-    add_vector(fig, 0, 0, Q_s_c.real, Q_s_c.imag, "orange", "Q_s")
-    add_vector(fig, 0, 0, Q_r_c.real, Q_r_c.imag, "cyan", "Q_r")
+    # 3) Q_s from S_s => S_s + jQ_s
+    add_vector(S_s_end[0], S_s_end[1], Q_s_end[0], Q_s_end[1], "orange", "Q_s")
+
+    # 4) Q_r from S_r => S_r + jQ_r
+    add_vector(S_r_end[0], S_r_end[1], Q_r_end[0], Q_r_end[1], "cyan", "Q_r")
+
+    # Auto-range
+    all_x = [p[0] for p in all_points]
+    all_y = [p[1] for p in all_points]
+    min_x, max_x = min(all_x), max(all_x)
+    min_y, max_y = min(all_y), max(all_y)
+
+    margin_x = 0.1*(max_x - min_x if max_x!=min_x else 1)
+    margin_y = 0.1*(max_y - min_y if max_y!=min_y else 1)
+    x_range = [min_x - margin_x, max_x + margin_x]
+    y_range = [min_y - margin_y, max_y + margin_y]
 
     fig.update_layout(
-        title="Power Flow Vectors (MVA) with Q_s & Q_r (Label in Middle)",
+        title="Power Vectors with Q_s, Q_r from S_s, S_r + Perp-Offset Labels",
         xaxis=dict(range=x_range, zeroline=True),
         yaxis=dict(range=y_range, zeroline=True),
         width=800, height=500
     )
-
     return fig
 
 
@@ -195,15 +205,11 @@ def plot_bar_chart(S_s, S_i, S_o, S_loss, S_r):
 # 4) STREAMLIT APP
 # ===============================
 def main():
-    st.title("Arrows with Label in the Middle")
-    st.write(
-        """
-        This version draws two annotations per vector:
-        1) The arrow from tail->tip (no label),
-        2) A label at the midpoint (no arrow).
-        That way, the arrowhead is at the tip while the text is in the middle.
-        """
-    )
+    st.title("Q_s from S_s, Q_r from S_r, with Perp-Offset Labels")
+    st.write("""
+        In this version, Q_s is drawn from the tip of S_s, Q_r from the tip of S_r.
+        We also offset the label perpendicular to each vector's midpoint so it doesn't cross the line.
+    """)
 
     st.image(
         "https://i.postimg.cc/FKStDhY9/Frame-2-1.png",
@@ -229,7 +235,6 @@ def main():
         R_ohm_km = st.slider("R (Ω/km)", 0.0001, 0.5, float(scase["R"]), 0.01)
         X_ohm_km = st.slider("X (Ω/km)", 0.0001, 0.5, float(scase["X"]), 0.01)
         C_nF_km = st.slider("C (nF/km)", 0.1, 400.0, float(scase["C"]*1e9), 10.0)
-
     C_f = C_nF_km*1e-9
 
     # Calculate
@@ -237,7 +242,6 @@ def main():
         Vs, Vr, R_ohm_km, X_ohm_km, C_f, delta_deg, scase["base_voltage"], length_km
     )
 
-    # Build table for results
     def fmt_complex(z):
         if np.isnan(z.real) or not np.isfinite(z.real):
             return "NaN"
@@ -246,9 +250,10 @@ def main():
     def fmt_float(x):
         return f"{x:.2f}" if np.isfinite(x) else "NaN"
 
+    # Build table: (Name, Value)
     results_data = {
         "Name": [
-            "S_s", "S_i", "S_o", "S_loss", "S_r", 
+            "S_s", "S_i", "S_o", "S_loss", "S_r",
             "Q_s (MVAr)", "Q_r (MVAr)"
         ],
         "Value": [
@@ -266,7 +271,6 @@ def main():
     st.subheader("Power Flow Results (MVA = MW + jMVAr)")
     st.table(df_results)
 
-    # Plot
     fig_vector = plot_power_vectors(S_s, S_i, S_o, S_loss, S_r, Q_s, Q_r)
     st.plotly_chart(fig_vector, use_container_width=True)
 
