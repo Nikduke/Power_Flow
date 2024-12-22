@@ -157,7 +157,7 @@ def plot_power_vectors(S_s, S_i, S_o, S_r, S_loss, Q_s, Q_r):
     fig.update_layout(
         xaxis=dict(title="Active Power (MW)", range=[min_x - margin_x, max_x + margin_x], zeroline=True),
         yaxis=dict(title="Reactive Power (MVAr)", range=[min_y - margin_y, max_y + margin_y], zeroline=True),
-        width=700, height=700
+        width=700, height=600
     )
     return fig
 
@@ -176,7 +176,7 @@ def plot_bar_chart(S_s, S_i, S_o, S_r, S_loss):
         
         xaxis_title="Power Component",
         yaxis_title="Magnitude",
-        width=700, height=700
+        width=700, height=600
     )
     return fig
 
