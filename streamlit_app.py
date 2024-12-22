@@ -43,9 +43,6 @@ def calculate_power_flow(Vs, Vr, R, X, C, delta_deg, base_voltage, length, freq=
     """
     Returns (S_s, S_i, S_o, S_r, S_loss) as complex MVA,
     plus Q_s, Q_r in MVAr.
-    
-    Q_s from S_s -> S_s + jQ_s
-    Q_r from S_o -> S_o + jQ_r
     """
     delta_rad = np.deg2rad(delta_deg)
     Z = (R + 1j*X)*length
@@ -82,8 +79,8 @@ def calculate_power_flow(Vs, Vr, R, X, C, delta_deg, base_voltage, length, freq=
 # ===============================
 # 3) PLOTTING
 # ===============================
-def plot_power_vectors(S_s, S_i, S_o, S_r, S_loss, Q_s, Q_r):
-    """Vector diagram with S_s, S_i, S_o, S_r from origin, plus Q_s, Q_r, S_loss."""
+def plot_power_diagram(S_s, S_i, S_o, S_r, S_loss, Q_s, Q_r):
+    """Power Diagram with S_s, S_i, S_o, S_r, plus Q_s, Q_r, and S_loss."""
     fig = go.Figure()
 
     def to_xy(z):
@@ -158,7 +155,6 @@ def plot_power_vectors(S_s, S_i, S_o, S_r, S_loss, Q_s, Q_r):
     margin_y = 0.1*span_y
 
     fig.update_layout(
-        title="Vector Diagram",
         xaxis=dict(range=[min_x-margin_x, max_x+margin_x], zeroline=True),
         yaxis=dict(range=[min_y-margin_y, max_y+margin_y], zeroline=True),
         width=700, height=500
@@ -177,7 +173,6 @@ def plot_bar_chart(S_s, S_i, S_o, S_r, S_loss):
     ])
     fig.update_layout(
         barmode='group',
-        title="Active & Reactive Power",
         xaxis_title="Power Component",
         yaxis_title="Magnitude",
         width=700, height=400
@@ -226,41 +221,39 @@ def main():
         )
     with row1_col2:
         st.subheader("Line Cases")
-        st.dataframe(df_cases.style.format(precision=3), height=220)
+        st.table(df_cases)
 
-    # Row 2: results table (left), vector diagram (right)
-    row2_col1, row2_col2 = st.columns([1,1])
+    # Row 2: Power Diagram and Bar Chart
+    row2_col1, row2_col2 = st.columns([1, 1])
     with row2_col1:
-        st.subheader("Power Flow Results (MVA = MW + jMVAr)")
-
-        def fmt_cplx(z):
-            if np.isnan(z.real) or not np.isfinite(z.real):
-                return "NaN"
-            return f"{z.real:.2f} + j{z.imag:.2f}"
-
-        def fmt_float(f):
-            return f"{f:.2f}" if np.isfinite(f) else "NaN"
-
-        data = {
-            "Name": ["S_s", "S_i", "S_o", "S_r", "S_loss", "Q_s (MVAr)", "Q_r (MVAr)"],
-            "Value": [
-                fmt_cplx(S_s), fmt_cplx(S_i), fmt_cplx(S_o),
-                fmt_cplx(S_r), fmt_cplx(S_loss),
-                fmt_float(Q_s), fmt_float(Q_r)
-            ]
-        }
-        df_res = pd.DataFrame(data)
-        st.table(df_res)
-
-    with row2_col2:
-        fig_vector = plot_power_vectors(S_s, S_i, S_o, S_r, S_loss, Q_s, Q_r)
-        st.subheader("Vector Diagram")
+        fig_vector = plot_power_diagram(S_s, S_i, S_o, S_r, S_loss, Q_s, Q_r)
         st.plotly_chart(fig_vector, use_container_width=True)
 
-    # Row 3: bar chart spanning full width
-    st.subheader("Active & Reactive Power Chart")
-    fig_bar = plot_bar_chart(S_s, S_i, S_o, S_r, S_loss)
-    st.plotly_chart(fig_bar, use_container_width=True)
+    with row2_col2:
+        fig_bar = plot_bar_chart(S_s, S_i, S_o, S_r, S_loss)
+        st.plotly_chart(fig_bar, use_container_width=True)
+
+    # Row 3: Calculation Table
+    st.subheader("Power Flow Results (MVA = MW + jMVAr)")
+
+    def fmt_cplx(z):
+        if np.isnan(z.real) or not np.isfinite(z.real):
+            return "NaN"
+        return f"{z.real:.2f} + j{z.imag:.2f}"
+
+    def fmt_float(f):
+        return f"{f:.2f}" if np.isfinite(f) else "NaN"
+
+    data = {
+        "Name": ["S_s", "S_i", "S_o", "S_r", "S_loss", "Q_s (MVAr)", "Q_r (MVAr)"],
+        "Value": [
+            fmt_cplx(S_s), fmt_cplx(S_i), fmt_cplx(S_o),
+            fmt_cplx(S_r), fmt_cplx(S_loss),
+            fmt_float(Q_s), fmt_float(Q_r)
+        ]
+    }
+    df_res = pd.DataFrame(data)
+    st.table(df_res)
 
 
 if __name__ == "__main__":
